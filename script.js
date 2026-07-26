@@ -1,117 +1,61 @@
 (() => {
   "use strict";
 
-  /* =========================================================
-     CONFIGURATION
-  ========================================================= */
-
   const CLUB_SLUG = "republic-of-noobistan";
   const MEMBER_LIMIT = 6;
-  const PROFILE_REQUEST_DELAY = 250;
-
-  const DEFAULT_AVATAR =
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Crect width='160' height='160' rx='80' fill='%230b2344'/%3E%3Ccircle cx='80' cy='58' r='28' fill='%2379bfee'/%3E%3Cpath d='M29 145c5-34 25-51 51-51s46 17 51 51' fill='%2379bfee'/%3E%3C/svg%3E";
-
-  /* =========================================================
-     ELEMENTS
-  ========================================================= */
+  const PROFILE_DELAY = 200;
 
   const tabs = Array.from(document.querySelectorAll(".tab"));
   const pages = Array.from(document.querySelectorAll(".page"));
 
+  const membersBoard = document.getElementById("membersBoard");
+  const membersStatus = document.getElementById("membersStatus");
+  const refreshMembers = document.getElementById("refreshMembers");
+
   const audioPlayer = document.getElementById("audioPlayer");
   const visualizer = document.getElementById("visualizer");
-
   const stars = document.getElementById("stars");
   const confetti = document.getElementById("confetti");
+  const celebrateButton = document.getElementById("celebrateButton");
+  const copyrightLogo = document.getElementById("copyrightLogo");
 
-  const celebrateButton =
-    document.getElementById("celebrateButton");
+  const DEFAULT_AVATAR =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Crect width='160' height='160' rx='80' fill='%230b2344'/%3E%3Ccircle cx='80' cy='58' r='28' fill='%2379bfee'/%3E%3Cpath d='M29 145c5-34 25-51 51-51s46 17 51 51' fill='%2379bfee'/%3E%3C/svg%3E";
 
-  const copyrightLogo =
-    document.getElementById("copyrightLogo");
+  let memberBoardLoading = false;
+  let callbackCounter = 0;
+  let logoClicks = 0;
+  let logoTimer = null;
 
-  const membersBoard =
-    document.getElementById("membersBoard");
-
-  const membersStatus =
-    document.getElementById("membersStatus");
-
-  const refreshMembers =
-    document.getElementById("refreshMembers");
-
-  let logoClickCount = 0;
-  let logoClickTimer = null;
-  let membersAreLoading = false;
-
-  /* =========================================================
-     PAGE NAVIGATION
-  ========================================================= */
+  /* =====================================================
+     PAGE BUTTONS
+  ===================================================== */
 
   function activatePage(pageId) {
-    if (!pageId) {
-      return;
-    }
-
     tabs.forEach((tab) => {
-      const isActive = tab.dataset.page === pageId;
+      const active = tab.dataset.page === pageId;
 
-      tab.classList.toggle("active", isActive);
-      tab.setAttribute(
-        "aria-selected",
-        String(isActive)
-      );
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", String(active));
     });
 
     pages.forEach((page) => {
-      const isActive = page.id === pageId;
+      const active = page.id === pageId;
 
-      page.classList.toggle("active", isActive);
-      page.setAttribute(
-        "aria-hidden",
-        String(!isActive)
-      );
-    });
-
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth"
+      page.classList.toggle("active", active);
+      page.setAttribute("aria-hidden", String(!active));
     });
   }
 
-  function initializeTabs() {
-    tabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        activatePage(tab.dataset.page);
-      });
-
-      tab.addEventListener("keydown", (event) => {
-        if (
-          event.key !== "ArrowLeft" &&
-          event.key !== "ArrowRight"
-        ) {
-          return;
-        }
-
-        event.preventDefault();
-
-        const currentIndex = tabs.indexOf(tab);
-
-        const nextIndex =
-          event.key === "ArrowRight"
-            ? (currentIndex + 1) % tabs.length
-            : (currentIndex - 1 + tabs.length) %
-              tabs.length;
-
-        tabs[nextIndex].focus();
-        activatePage(tabs[nextIndex].dataset.page);
-      });
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      activatePage(tab.dataset.page);
     });
-  }
+  });
 
-  /* =========================================================
-     UTILITY FUNCTIONS
-  ========================================================= */
+  /* =====================================================
+     UTILITIES
+  ===================================================== */
 
   function wait(milliseconds) {
     return new Promise((resolve) => {
@@ -120,113 +64,139 @@
   }
 
   function escapeHtml(value) {
-    return String(value ?? "").replace(
-      /[&<>"']/g,
-      (character) => {
-        const entities = {
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#039;"
-        };
+    return String(value ?? "").replace(/[&<>"']/g, (character) => {
+      const entities = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      };
 
-        return entities[character];
-      }
-    );
+      return entities[character];
+    });
   }
 
   function formatJoinedDate(timestamp) {
-    const numericTimestamp = Number(timestamp);
+    const value = Number(timestamp);
 
-    if (
-      !numericTimestamp ||
-      !Number.isFinite(numericTimestamp)
-    ) {
+    if (!Number.isFinite(value) || value <= 0) {
       return "New member";
     }
 
-    const joinedDate = new Date(
-      numericTimestamp * 1000
-    );
+    const date = new Date(value * 1000);
 
-    if (Number.isNaN(joinedDate.getTime())) {
+    if (Number.isNaN(date.getTime())) {
       return "New member";
     }
 
-    return `Joined ${joinedDate.toLocaleDateString(
-      "en-US",
-      {
-        month: "short",
-        day: "numeric",
-        year: "numeric"
-      }
-    )}`;
+    return `Joined ${date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    })}`;
   }
 
-  async function requestJson(url) {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json"
+  /* =====================================================
+     CHESS.COM JSONP
+
+     Chess.com supports:
+     ?callback=functionName
+  ===================================================== */
+
+  function chessJsonp(url, timeout = 15000) {
+    return new Promise((resolve, reject) => {
+      callbackCounter += 1;
+
+      const callbackName =
+        `chessComCallback_${Date.now()}_${callbackCounter}`;
+
+      const script = document.createElement("script");
+
+      const separator = url.includes("?") ? "&" : "?";
+
+      let finished = false;
+
+      function cleanup() {
+        if (script.parentNode) {
+          script.parentNode.removeChild(script);
+        }
+
+        try {
+          delete window[callbackName];
+        } catch (error) {
+          window[callbackName] = undefined;
+        }
       }
+
+      const timer = window.setTimeout(() => {
+        if (finished) {
+          return;
+        }
+
+        finished = true;
+        cleanup();
+
+        reject(new Error(`Chess.com JSONP request timed out: ${url}`));
+      }, timeout);
+
+      window[callbackName] = (data) => {
+        if (finished) {
+          return;
+        }
+
+        finished = true;
+        window.clearTimeout(timer);
+        cleanup();
+        resolve(data);
+      };
+
+      script.onerror = () => {
+        if (finished) {
+          return;
+        }
+
+        finished = true;
+        window.clearTimeout(timer);
+        cleanup();
+
+        reject(new Error(`Chess.com JSONP request failed: ${url}`));
+      };
+
+      script.src =
+        `${url}${separator}callback=${encodeURIComponent(callbackName)}`;
+
+      script.async = true;
+
+      document.head.appendChild(script);
     });
-
-    if (!response.ok) {
-      throw new Error(
-        `Chess.com API request failed: ${response.status}`
-      );
-    }
-
-    return response.json();
   }
 
-  /* =========================================================
-     NEWEST MEMBER BOARD
-  ========================================================= */
+  /* =====================================================
+     NEWEST MEMBERS
+  ===================================================== */
 
-  function normalizeMember(member, index) {
-    if (
-      member &&
-      typeof member === "object" &&
-      typeof member.username === "string" &&
-      member.username.trim()
-    ) {
-      return {
-        username: member.username.trim(),
-        joined: Number(member.joined) || 0,
-        originalIndex: index
-      };
+  function renderSkeletons() {
+    if (!membersBoard) {
+      return;
     }
 
-    if (
-      typeof member === "string" &&
-      member.trim()
-    ) {
-      return {
-        username: member.trim(),
-        joined: 0,
-        originalIndex: index
-      };
-    }
-
-    return null;
+    membersBoard.innerHTML = Array.from(
+      { length: MEMBER_LIMIT },
+      () => '<div class="member-skeleton"></div>'
+    ).join("");
   }
 
   function createMemberCard(member, index) {
-    const safeUsername = escapeHtml(
-      member.username
-    );
+    const safeUsername = escapeHtml(member.username);
 
     const profileUrl =
-      `https://www.chess.com/member/${encodeURIComponent(
-        member.username
-      )}`;
+      `https://www.chess.com/member/${encodeURIComponent(member.username)}`;
 
     return `
       <a
         class="member-card"
-        data-member-card="${index}"
+        data-member-index="${index}"
         href="${profileUrl}"
         target="_blank"
         rel="noopener noreferrer"
@@ -246,56 +216,59 @@
         </span>
 
         <span class="member-meta">
-          ${escapeHtml(
-            formatJoinedDate(member.joined)
-          )}
+          ${escapeHtml(formatJoinedDate(member.joined))}
         </span>
       </a>
     `;
   }
 
-  function renderMemberSkeletons() {
-    if (!membersBoard) {
-      return;
-    }
+  function normalizeMembers(allTimeMembers) {
+    const uniqueMembers = new Map();
 
-    membersBoard.innerHTML = Array.from(
-      { length: MEMBER_LIMIT },
-      () => `
-        <div class="member-skeleton">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-      `
-    ).join("");
+    allTimeMembers.forEach((entry, index) => {
+      let username = "";
+      let joined = 0;
+
+      if (
+        entry &&
+        typeof entry === "object" &&
+        typeof entry.username === "string"
+      ) {
+        username = entry.username.trim();
+        joined = Number(entry.joined) || 0;
+      } else if (typeof entry === "string") {
+        username = entry.trim();
+      }
+
+      if (!username) {
+        return;
+      }
+
+      uniqueMembers.set(username.toLowerCase(), {
+        username,
+        joined,
+        sourceIndex: index
+      });
+    });
+
+    return Array.from(uniqueMembers.values());
   }
 
-  function renderMemberError(message) {
-    if (membersBoard) {
-      membersBoard.innerHTML = `
-        <div class="members-error">
-          ${escapeHtml(message)}
-        </div>
-      `;
-    }
+  function sortNewestMembers(members) {
+    return members
+      .sort((first, second) => {
+        if (first.joined !== second.joined) {
+          return second.joined - first.joined;
+        }
 
-    if (membersStatus) {
-      membersStatus.textContent =
-        "Member board unavailable";
-    }
+        return second.sourceIndex - first.sourceIndex;
+      })
+      .slice(0, MEMBER_LIMIT);
   }
 
-  async function loadMemberProfile(
-    member,
-    index
-  ) {
-    if (!membersBoard) {
-      return;
-    }
-
-    const card = membersBoard.querySelector(
-      `[data-member-card="${index}"]`
+  async function loadProfile(member, index) {
+    const card = membersBoard?.querySelector(
+      `[data-member-index="${index}"]`
     );
 
     if (!card) {
@@ -303,210 +276,135 @@
     }
 
     try {
-      const profile = await requestJson(
+      const profile = await chessJsonp(
         `https://api.chess.com/pub/player/${encodeURIComponent(
           member.username.toLowerCase()
         )}`
       );
 
-      const avatarElement =
-        card.querySelector(".member-avatar");
+      const avatarElement = card.querySelector(".member-avatar");
+      const nameElement = card.querySelector(".member-name");
+      const metaElement = card.querySelector(".member-meta");
 
-      const nameElement =
-        card.querySelector(".member-name");
+      const displayedUsername =
+        profile?.username || member.username;
 
-      const metaElement =
-        card.querySelector(".member-meta");
-
-      const profileUsername =
-        profile.username || member.username;
-
-      if (profile.url) {
+      if (profile?.url) {
         card.href = profile.url;
       }
 
       if (avatarElement) {
-        avatarElement.alt =
-          `${profileUsername} avatar`;
+        avatarElement.alt = `${displayedUsername} avatar`;
 
-        if (profile.avatar) {
+        if (profile?.avatar) {
           avatarElement.src = profile.avatar;
         }
 
-        avatarElement.addEventListener(
-          "error",
-          () => {
-            avatarElement.src = DEFAULT_AVATAR;
-          },
-          { once: true }
-        );
+        avatarElement.onerror = () => {
+          avatarElement.onerror = null;
+          avatarElement.src = DEFAULT_AVATAR;
+        };
       }
 
       if (nameElement) {
-        nameElement.textContent =
-          profileUsername;
+        nameElement.textContent = displayedUsername;
       }
 
       if (metaElement) {
-        const joinedText =
-          formatJoinedDate(member.joined);
+        const joinedText = formatJoinedDate(member.joined);
 
-        metaElement.textContent =
-          profile.title
-            ? `${profile.title} · ${joinedText}`
-            : joinedText;
+        metaElement.textContent = profile?.title
+          ? `${profile.title} · ${joinedText}`
+          : joinedText;
       }
     } catch (error) {
       console.warn(
-        `Profile details could not be loaded for ${member.username}.`,
+        `Could not load profile details for ${member.username}:`,
         error
       );
     }
   }
 
   async function loadNewestMembers() {
-    if (
-      !membersBoard ||
-      membersAreLoading
-    ) {
+    if (!membersBoard || memberBoardLoading) {
       return;
     }
 
-    membersAreLoading = true;
+    memberBoardLoading = true;
 
     if (refreshMembers) {
       refreshMembers.disabled = true;
-      refreshMembers.setAttribute(
-        "aria-busy",
-        "true"
-      );
     }
 
     if (membersStatus) {
-      membersStatus.textContent =
-        "Loading newest members…";
+      membersStatus.textContent = "Loading newest members…";
     }
 
-    renderMemberSkeletons();
+    renderSkeletons();
 
     try {
-      const clubData = await requestJson(
+      const clubData = await chessJsonp(
         `https://api.chess.com/pub/club/${CLUB_SLUG}/members`
       );
 
-      const rawMembers =
-        Array.isArray(clubData.all_time)
-          ? clubData.all_time
-          : [];
+      const allTimeMembers = Array.isArray(clubData?.all_time)
+        ? clubData.all_time
+        : [];
 
-      const uniqueMembers = new Map();
-
-      rawMembers.forEach(
-        (rawMember, index) => {
-          const member = normalizeMember(
-            rawMember,
-            index
-          );
-
-          if (!member) {
-            return;
-          }
-
-          uniqueMembers.set(
-            member.username.toLowerCase(),
-            member
-          );
-        }
+      const newestMembers = sortNewestMembers(
+        normalizeMembers(allTimeMembers)
       );
 
-      const newestMembers = Array.from(
-        uniqueMembers.values()
-      )
-        .sort((firstMember, secondMember) => {
-          if (
-            firstMember.joined &&
-            secondMember.joined
-          ) {
-            return (
-              secondMember.joined -
-              firstMember.joined
-            );
-          }
-
-          return (
-            secondMember.originalIndex -
-            firstMember.originalIndex
-          );
-        })
-        .slice(0, MEMBER_LIMIT);
-
       if (!newestMembers.length) {
-        throw new Error(
-          "No club members were returned."
-        );
+        throw new Error("No members were returned by Chess.com.");
       }
 
-      membersBoard.innerHTML =
-        newestMembers
-          .map(createMemberCard)
-          .join("");
+      membersBoard.innerHTML = newestMembers
+        .map(createMemberCard)
+        .join("");
 
       if (membersStatus) {
         membersStatus.textContent =
           `Showing ${newestMembers.length} newest members`;
       }
 
-      for (
-        let index = 0;
-        index < newestMembers.length;
-        index += 1
-      ) {
-        await loadMemberProfile(
-          newestMembers[index],
-          index
-        );
-
-        await wait(
-          PROFILE_REQUEST_DELAY
-        );
+      /*
+       * Load profile information serially.
+       * A failed avatar request will not remove the member card.
+       */
+      for (let index = 0; index < newestMembers.length; index += 1) {
+        await loadProfile(newestMembers[index], index);
+        await wait(PROFILE_DELAY);
       }
     } catch (error) {
-      console.error(
-        "Newest member board error:",
-        error
-      );
+      console.error("Newest member board failed:", error);
 
-      renderMemberError(
-        "Unable to load the newest members right now. Press Refresh to try again."
-      );
+      membersBoard.innerHTML = `
+        <div class="members-error">
+          Unable to load the newest members right now.
+          Press Refresh to try again.
+        </div>
+      `;
+
+      if (membersStatus) {
+        membersStatus.textContent = "Member board unavailable";
+      }
     } finally {
-      membersAreLoading = false;
+      memberBoardLoading = false;
 
       if (refreshMembers) {
         refreshMembers.disabled = false;
-        refreshMembers.removeAttribute(
-          "aria-busy"
-        );
       }
     }
   }
 
-  function initializeMemberBoard() {
-    if (refreshMembers) {
-      refreshMembers.addEventListener(
-        "click",
-        () => {
-          loadNewestMembers();
-        }
-      );
-    }
-
-    loadNewestMembers();
+  if (refreshMembers) {
+    refreshMembers.addEventListener("click", loadNewestMembers);
   }
 
-  /* =========================================================
+  /* =====================================================
      BACKGROUND STARS
-  ========================================================= */
+  ===================================================== */
 
   function createStars(count = 72) {
     if (!stars) {
@@ -515,28 +413,18 @@
 
     stars.innerHTML = "";
 
-    const fragment =
-      document.createDocumentFragment();
+    const fragment = document.createDocumentFragment();
 
-    for (
-      let index = 0;
-      index < count;
-      index += 1
-    ) {
-      const star =
-        document.createElement("span");
+    for (let index = 0; index < count; index += 1) {
+      const star = document.createElement("span");
 
       star.className = "star";
-
-      star.style.left =
-        `${Math.random() * 100}%`;
-
-      star.style.top =
-        `${Math.random() * 100}%`;
+      star.style.left = `${Math.random() * 100}%`;
+      star.style.top = `${Math.random() * 100}%`;
 
       star.style.setProperty(
         "--duration",
-        `${2.5 + Math.random() * 4.5}s`
+        `${2.4 + Math.random() * 4}s`
       );
 
       star.style.setProperty(
@@ -550,15 +438,12 @@
     stars.appendChild(fragment);
   }
 
-  /* =========================================================
-     AUDIO VISUALIZER
-  ========================================================= */
+  /* =====================================================
+     RADIO VISUALIZER
+  ===================================================== */
 
   function synchronizeVisualizer() {
-    if (
-      !audioPlayer ||
-      !visualizer
-    ) {
+    if (!audioPlayer || !visualizer) {
       return;
     }
 
@@ -568,32 +453,15 @@
     );
   }
 
-  function initializeAudio() {
-    if (!audioPlayer) {
-      return;
-    }
-
-    audioPlayer.addEventListener(
-      "play",
-      synchronizeVisualizer
-    );
-
-    audioPlayer.addEventListener(
-      "pause",
-      synchronizeVisualizer
-    );
-
-    audioPlayer.addEventListener(
-      "ended",
-      synchronizeVisualizer
-    );
-
-    synchronizeVisualizer();
+  if (audioPlayer) {
+    audioPlayer.addEventListener("play", synchronizeVisualizer);
+    audioPlayer.addEventListener("pause", synchronizeVisualizer);
+    audioPlayer.addEventListener("ended", synchronizeVisualizer);
   }
 
-  /* =========================================================
-     CELEBRATION EFFECT
-  ========================================================= */
+  /* =====================================================
+     CELEBRATION
+  ===================================================== */
 
   function celebrate() {
     if (!confetti) {
@@ -602,28 +470,17 @@
 
     confetti.innerHTML = "";
 
-    const fragment =
-      document.createDocumentFragment();
+    const fragment = document.createDocumentFragment();
 
-    for (
-      let index = 0;
-      index < 72;
-      index += 1
-    ) {
-      const piece =
-        document.createElement("span");
+    for (let index = 0; index < 72; index += 1) {
+      const piece = document.createElement("span");
 
-      piece.className =
-        "confetti-piece";
-
-      piece.style.left =
-        `${Math.random() * 100}%`;
+      piece.className = "confetti-piece";
+      piece.style.left = `${Math.random() * 100}%`;
 
       piece.style.setProperty(
         "--hue",
-        String(
-          185 + Math.random() * 65
-        )
+        String(185 + Math.random() * 65)
       );
 
       piece.style.setProperty(
@@ -636,8 +493,7 @@
         `${-100 + Math.random() * 200}px`
       );
 
-      piece.style.animationDelay =
-        `${Math.random() * 0.5}s`;
+      piece.style.animationDelay = `${Math.random() * 0.5}s`;
 
       fragment.appendChild(piece);
     }
@@ -649,125 +505,70 @@
     }, 5500);
   }
 
-  function initializeCelebration() {
-    if (celebrateButton) {
-      celebrateButton.addEventListener(
-        "click",
-        celebrate
-      );
-    }
+  if (celebrateButton) {
+    celebrateButton.addEventListener("click", celebrate);
   }
 
-  /* =========================================================
-     PANEL LIGHTING EFFECT
-  ========================================================= */
+  /* =====================================================
+     PANEL LIGHTING
+  ===================================================== */
 
-  function initializePanelLighting() {
-    document
-      .querySelectorAll(".panel")
-      .forEach((panel) => {
-        panel.addEventListener(
-          "pointermove",
-          (event) => {
-            const rectangle =
-              panel.getBoundingClientRect();
+  document.querySelectorAll(".panel").forEach((panel) => {
+    panel.addEventListener("pointermove", (event) => {
+      const rectangle = panel.getBoundingClientRect();
 
-            const mouseX =
-              ((event.clientX -
-                rectangle.left) /
-                rectangle.width) *
-              100;
+      const mouseX =
+        ((event.clientX - rectangle.left) / rectangle.width) * 100;
 
-            const mouseY =
-              ((event.clientY -
-                rectangle.top) /
-                rectangle.height) *
-              100;
+      const mouseY =
+        ((event.clientY - rectangle.top) / rectangle.height) * 100;
 
-            panel.style.setProperty(
-              "--mx",
-              `${mouseX}%`
-            );
+      panel.style.setProperty("--mx", `${mouseX}%`);
+      panel.style.setProperty("--my", `${mouseY}%`);
+    });
 
-            panel.style.setProperty(
-              "--my",
-              `${mouseY}%`
-            );
-          }
-        );
+    panel.addEventListener("pointerleave", () => {
+      panel.style.removeProperty("--mx");
+      panel.style.removeProperty("--my");
+    });
+  });
 
-        panel.addEventListener(
-          "pointerleave",
-          () => {
-            panel.style.removeProperty(
-              "--mx"
-            );
-
-            panel.style.removeProperty(
-              "--my"
-            );
-          }
-        );
-      });
-  }
-
-  /* =========================================================
+  /* =====================================================
      HIDDEN LOGO INTERACTION
-  ========================================================= */
+  ===================================================== */
 
-  function initializeLogoInteraction() {
-    if (!copyrightLogo) {
-      return;
-    }
+  if (copyrightLogo) {
+    copyrightLogo.addEventListener("click", (event) => {
+      logoClicks += 1;
 
-    copyrightLogo.addEventListener(
-      "click",
-      (event) => {
-        logoClickCount += 1;
+      window.clearTimeout(logoTimer);
 
-        window.clearTimeout(
-          logoClickTimer
-        );
+      logoTimer = window.setTimeout(() => {
+        logoClicks = 0;
+      }, 1800);
 
-        logoClickTimer =
-          window.setTimeout(() => {
-            logoClickCount = 0;
-          }, 1800);
-
-        if (logoClickCount < 7) {
-          return;
-        }
-
+      if (logoClicks >= 7) {
         event.preventDefault();
 
-        logoClickCount = 0;
+        logoClicks = 0;
 
-        document.body.classList.toggle(
-          "secret-awake"
-        );
-
+        document.body.classList.toggle("secret-awake");
         celebrate();
       }
-    );
+    });
   }
 
-  /* =========================================================
-     INITIALIZATION
-  ========================================================= */
+  /* =====================================================
+     START
+  ===================================================== */
 
   function initializeDashboard() {
-    initializeTabs();
     createStars();
-    initializeAudio();
-    initializeCelebration();
-    initializePanelLighting();
-    initializeLogoInteraction();
-    initializeMemberBoard();
+    synchronizeVisualizer();
+    loadNewestMembers();
   }
 
-  if (
-    document.readyState === "loading"
-  ) {
+  if (document.readyState === "loading") {
     document.addEventListener(
       "DOMContentLoaded",
       initializeDashboard,
