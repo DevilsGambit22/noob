@@ -3,7 +3,7 @@
 
   const CLUB_SLUG = "republic-of-noobistan";
   const MEMBER_LIMIT = 6;
-  const PROFILE_DELAY = 200;
+  const REQUEST_DELAY = 200;
 
   const tabs = Array.from(document.querySelectorAll(".tab"));
   const pages = Array.from(document.querySelectorAll(".page"));
@@ -23,38 +23,45 @@
     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Crect width='160' height='160' rx='80' fill='%230b2344'/%3E%3Ccircle cx='80' cy='58' r='28' fill='%2379bfee'/%3E%3Cpath d='M29 145c5-34 25-51 51-51s46 17 51 51' fill='%2379bfee'/%3E%3C/svg%3E";
 
   let memberBoardLoading = false;
-  let callbackCounter = 0;
-  let logoClicks = 0;
-  let logoTimer = null;
+  let jsonpCounter = 0;
+  let logoClickCount = 0;
+  let logoClickTimer = null;
 
   /* =====================================================
-     PAGE BUTTONS
+     PAGE NAVIGATION
   ===================================================== */
 
   function activatePage(pageId) {
     tabs.forEach((tab) => {
-      const active = tab.dataset.page === pageId;
+      const isActive = tab.dataset.page === pageId;
 
-      tab.classList.toggle("active", active);
-      tab.setAttribute("aria-selected", String(active));
+      tab.classList.toggle("active", isActive);
+      tab.setAttribute("aria-selected", String(isActive));
     });
 
     pages.forEach((page) => {
-      const active = page.id === pageId;
+      const isActive = page.id === pageId;
 
-      page.classList.toggle("active", active);
-      page.setAttribute("aria-hidden", String(!active));
+      page.classList.toggle("active", isActive);
+      page.setAttribute("aria-hidden", String(!isActive));
+    });
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth"
     });
   }
 
-  tabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      activatePage(tab.dataset.page);
+  function initializeTabs() {
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        activatePage(tab.dataset.page);
+      });
     });
-  });
+  }
 
   /* =====================================================
-     UTILITIES
+     GENERAL UTILITIES
   ===================================================== */
 
   function wait(milliseconds) {
@@ -77,45 +84,21 @@
     });
   }
 
-  function formatJoinedDate(timestamp) {
-    const value = Number(timestamp);
-
-    if (!Number.isFinite(value) || value <= 0) {
-      return "New member";
-    }
-
-    const date = new Date(value * 1000);
-
-    if (Number.isNaN(date.getTime())) {
-      return "New member";
-    }
-
-    return `Joined ${date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric"
-    })}`;
-  }
-
   /* =====================================================
-     CHESS.COM JSONP
-
-     Chess.com supports:
-     ?callback=functionName
+     CHESS.COM JSONP REQUEST
   ===================================================== */
 
   function chessJsonp(url, timeout = 15000) {
     return new Promise((resolve, reject) => {
-      callbackCounter += 1;
+      jsonpCounter += 1;
 
       const callbackName =
-        `chessComCallback_${Date.now()}_${callbackCounter}`;
+        `chessCallback_${Date.now()}_${jsonpCounter}`;
 
       const script = document.createElement("script");
-
       const separator = url.includes("?") ? "&" : "?";
 
-      let finished = false;
+      let completed = false;
 
       function cleanup() {
         if (script.parentNode) {
@@ -130,37 +113,43 @@
       }
 
       const timer = window.setTimeout(() => {
-        if (finished) {
+        if (completed) {
           return;
         }
 
-        finished = true;
+        completed = true;
         cleanup();
 
-        reject(new Error(`Chess.com JSONP request timed out: ${url}`));
+        reject(
+          new Error(`Chess.com request timed out: ${url}`)
+        );
       }, timeout);
 
       window[callbackName] = (data) => {
-        if (finished) {
+        if (completed) {
           return;
         }
 
-        finished = true;
+        completed = true;
+
         window.clearTimeout(timer);
         cleanup();
         resolve(data);
       };
 
       script.onerror = () => {
-        if (finished) {
+        if (completed) {
           return;
         }
 
-        finished = true;
+        completed = true;
+
         window.clearTimeout(timer);
         cleanup();
 
-        reject(new Error(`Chess.com JSONP request failed: ${url}`));
+        reject(
+          new Error(`Chess.com request failed: ${url}`)
+        );
       };
 
       script.src =
@@ -173,59 +162,13 @@
   }
 
   /* =====================================================
-     NEWEST MEMBERS
+     MEMBER DATA
   ===================================================== */
 
-  function renderSkeletons() {
-    if (!membersBoard) {
-      return;
-    }
-
-    membersBoard.innerHTML = Array.from(
-      { length: MEMBER_LIMIT },
-      () => '<div class="member-skeleton"></div>'
-    ).join("");
-  }
-
-  function createMemberCard(member, index) {
-    const safeUsername = escapeHtml(member.username);
-
-    const profileUrl =
-      `https://www.chess.com/member/${encodeURIComponent(member.username)}`;
-
-    return `
-      <a
-        class="member-card"
-        data-member-index="${index}"
-        href="${profileUrl}"
-        target="_blank"
-        rel="noopener noreferrer"
-        style="--member-delay:${index * 70}ms"
-      >
-        <span class="member-avatar-wrap">
-          <img
-            class="member-avatar"
-            src="${DEFAULT_AVATAR}"
-            alt="${safeUsername} avatar"
-            loading="lazy"
-          >
-        </span>
-
-        <span class="member-name">
-          ${safeUsername}
-        </span>
-
-        <span class="member-meta">
-          ${escapeHtml(formatJoinedDate(member.joined))}
-        </span>
-      </a>
-    `;
-  }
-
-  function normalizeMembers(allTimeMembers) {
+  function normalizeMembers(rawMembers) {
     const uniqueMembers = new Map();
 
-    allTimeMembers.forEach((entry, index) => {
+    rawMembers.forEach((entry, index) => {
       let username = "";
       let joined = 0;
 
@@ -254,19 +197,142 @@
     return Array.from(uniqueMembers.values());
   }
 
-  function sortNewestMembers(members) {
-    return members
-      .sort((first, second) => {
-        if (first.joined !== second.joined) {
-          return second.joined - first.joined;
+  function getNewestMembers(rawMembers) {
+    return normalizeMembers(rawMembers)
+      .sort((firstMember, secondMember) => {
+        if (firstMember.joined !== secondMember.joined) {
+          return secondMember.joined - firstMember.joined;
         }
 
-        return second.sourceIndex - first.sourceIndex;
+        return secondMember.sourceIndex - firstMember.sourceIndex;
       })
       .slice(0, MEMBER_LIMIT);
   }
 
-  async function loadProfile(member, index) {
+  function selectRating(stats) {
+    const ratings = [
+      {
+        label: "Rapid",
+        value: stats?.chess_rapid?.last?.rating
+      },
+      {
+        label: "Blitz",
+        value: stats?.chess_blitz?.last?.rating
+      },
+      {
+        label: "Bullet",
+        value: stats?.chess_bullet?.last?.rating
+      },
+      {
+        label: "Daily",
+        value: stats?.chess_daily?.last?.rating
+      },
+      {
+        label: "Chess960",
+        value: stats?.chess960_daily?.last?.rating
+      }
+    ];
+
+    return ratings.find((rating) => {
+      const numericRating = Number(rating.value);
+
+      return (
+        Number.isFinite(numericRating) &&
+        numericRating > 0
+      );
+    }) || null;
+  }
+
+  /* =====================================================
+     MEMBER BOARD RENDERING
+  ===================================================== */
+
+  function renderMemberSkeletons() {
+    if (!membersBoard) {
+      return;
+    }
+
+    membersBoard.innerHTML = Array.from(
+      { length: MEMBER_LIMIT },
+      () => `
+        <div class="member-skeleton">
+          <span class="member-skeleton-avatar"></span>
+
+          <span class="member-skeleton-lines">
+            <span></span>
+            <span></span>
+          </span>
+        </div>
+      `
+    ).join("");
+  }
+
+  function createMemberCard(member, index) {
+    const safeUsername = escapeHtml(member.username);
+
+    const profileUrl =
+      `https://www.chess.com/member/${encodeURIComponent(
+        member.username
+      )}`;
+
+    return `
+      <a
+        class="member-card"
+        data-member-index="${index}"
+        href="${profileUrl}"
+        target="_blank"
+        rel="noopener noreferrer"
+        style="--member-delay:${index * 70}ms"
+      >
+        <span class="member-avatar-wrap">
+          <img
+            class="member-avatar"
+            src="${DEFAULT_AVATAR}"
+            alt="${safeUsername} profile picture"
+            loading="lazy"
+          >
+        </span>
+
+        <span class="member-info">
+          <span class="member-name">
+            ${safeUsername}
+          </span>
+
+          <span class="member-rating-row">
+            <strong class="member-rating">
+              Loading…
+            </strong>
+
+            <small class="member-rating-type">
+              Rating
+            </small>
+          </span>
+        </span>
+      </a>
+    `;
+  }
+
+  function renderMemberError() {
+    if (membersBoard) {
+      membersBoard.innerHTML = `
+        <div class="members-error">
+          Unable to load the newest members right now.
+          Press Refresh to try again.
+        </div>
+      `;
+    }
+
+    if (membersStatus) {
+      membersStatus.textContent =
+        "Member board unavailable";
+    }
+  }
+
+  /* =====================================================
+     LOAD PROFILE AND RATING
+  ===================================================== */
+
+  async function loadMemberDetails(member, index) {
     const card = membersBoard?.querySelector(
       `[data-member-index="${index}"]`
     );
@@ -275,16 +341,26 @@
       return;
     }
 
+    const username = member.username.toLowerCase();
+
+    const avatarElement =
+      card.querySelector(".member-avatar");
+
+    const nameElement =
+      card.querySelector(".member-name");
+
+    const ratingElement =
+      card.querySelector(".member-rating");
+
+    const ratingTypeElement =
+      card.querySelector(".member-rating-type");
+
     try {
       const profile = await chessJsonp(
         `https://api.chess.com/pub/player/${encodeURIComponent(
-          member.username.toLowerCase()
+          username
         )}`
       );
-
-      const avatarElement = card.querySelector(".member-avatar");
-      const nameElement = card.querySelector(".member-name");
-      const metaElement = card.querySelector(".member-meta");
 
       const displayedUsername =
         profile?.username || member.username;
@@ -293,37 +369,71 @@
         card.href = profile.url;
       }
 
-      if (avatarElement) {
-        avatarElement.alt = `${displayedUsername} avatar`;
+      if (nameElement) {
+        nameElement.textContent = displayedUsername;
+      }
 
-        if (profile?.avatar) {
-          avatarElement.src = profile.avatar;
-        }
+      if (avatarElement) {
+        avatarElement.alt =
+          `${displayedUsername} profile picture`;
+
+        avatarElement.src =
+          profile?.avatar || DEFAULT_AVATAR;
 
         avatarElement.onerror = () => {
           avatarElement.onerror = null;
           avatarElement.src = DEFAULT_AVATAR;
         };
       }
-
-      if (nameElement) {
-        nameElement.textContent = displayedUsername;
-      }
-
-      if (metaElement) {
-        const joinedText = formatJoinedDate(member.joined);
-
-        metaElement.textContent = profile?.title
-          ? `${profile.title} · ${joinedText}`
-          : joinedText;
-      }
     } catch (error) {
       console.warn(
-        `Could not load profile details for ${member.username}:`,
+        `Profile request failed for ${member.username}:`,
         error
       );
     }
+
+    await wait(REQUEST_DELAY);
+
+    try {
+      const stats = await chessJsonp(
+        `https://api.chess.com/pub/player/${encodeURIComponent(
+          username
+        )}/stats`
+      );
+
+      const selectedRating = selectRating(stats);
+
+      if (ratingElement) {
+        ratingElement.textContent = selectedRating
+          ? Number(selectedRating.value).toLocaleString("en-US")
+          : "Unrated";
+      }
+
+      if (ratingTypeElement) {
+        ratingTypeElement.textContent = selectedRating
+          ? selectedRating.label
+          : "No rating";
+      }
+    } catch (error) {
+      console.warn(
+        `Stats request failed for ${member.username}:`,
+        error
+      );
+
+      if (ratingElement) {
+        ratingElement.textContent = "Unrated";
+      }
+
+      if (ratingTypeElement) {
+        ratingTypeElement.textContent =
+          "Rating unavailable";
+      }
+    }
   }
+
+  /* =====================================================
+     LOAD NEWEST MEMBERS
+  ===================================================== */
 
   async function loadNewestMembers() {
     if (!membersBoard || memberBoardLoading) {
@@ -334,72 +444,83 @@
 
     if (refreshMembers) {
       refreshMembers.disabled = true;
+      refreshMembers.setAttribute("aria-busy", "true");
     }
 
     if (membersStatus) {
-      membersStatus.textContent = "Loading newest members…";
+      membersStatus.textContent =
+        "Loading newest members…";
     }
 
-    renderSkeletons();
+    renderMemberSkeletons();
 
     try {
       const clubData = await chessJsonp(
         `https://api.chess.com/pub/club/${CLUB_SLUG}/members`
       );
 
-      const allTimeMembers = Array.isArray(clubData?.all_time)
-        ? clubData.all_time
-        : [];
+      const allTimeMembers =
+        Array.isArray(clubData?.all_time)
+          ? clubData.all_time
+          : [];
 
-      const newestMembers = sortNewestMembers(
-        normalizeMembers(allTimeMembers)
-      );
+      const newestMembers =
+        getNewestMembers(allTimeMembers);
 
       if (!newestMembers.length) {
-        throw new Error("No members were returned by Chess.com.");
+        throw new Error(
+          "No members were returned by Chess.com."
+        );
       }
 
-      membersBoard.innerHTML = newestMembers
-        .map(createMemberCard)
-        .join("");
+      membersBoard.innerHTML =
+        newestMembers
+          .map(createMemberCard)
+          .join("");
 
       if (membersStatus) {
         membersStatus.textContent =
           `Showing ${newestMembers.length} newest members`;
       }
 
-      /*
-       * Load profile information serially.
-       * A failed avatar request will not remove the member card.
-       */
-      for (let index = 0; index < newestMembers.length; index += 1) {
-        await loadProfile(newestMembers[index], index);
-        await wait(PROFILE_DELAY);
+      for (
+        let index = 0;
+        index < newestMembers.length;
+        index += 1
+      ) {
+        await loadMemberDetails(
+          newestMembers[index],
+          index
+        );
+
+        await wait(REQUEST_DELAY);
       }
     } catch (error) {
-      console.error("Newest member board failed:", error);
+      console.error(
+        "Newest member board failed:",
+        error
+      );
 
-      membersBoard.innerHTML = `
-        <div class="members-error">
-          Unable to load the newest members right now.
-          Press Refresh to try again.
-        </div>
-      `;
-
-      if (membersStatus) {
-        membersStatus.textContent = "Member board unavailable";
-      }
+      renderMemberError();
     } finally {
       memberBoardLoading = false;
 
       if (refreshMembers) {
         refreshMembers.disabled = false;
+        refreshMembers.removeAttribute("aria-busy");
       }
     }
   }
 
-  if (refreshMembers) {
-    refreshMembers.addEventListener("click", loadNewestMembers);
+  function initializeMemberBoard() {
+    if (refreshMembers) {
+      refreshMembers.addEventListener(
+        "click",
+        loadNewestMembers
+      );
+    }
+
+    loadNewestMembers();
   }
 
   /* =====================================================
@@ -413,14 +534,24 @@
 
     stars.innerHTML = "";
 
-    const fragment = document.createDocumentFragment();
+    const fragment =
+      document.createDocumentFragment();
 
-    for (let index = 0; index < count; index += 1) {
-      const star = document.createElement("span");
+    for (
+      let index = 0;
+      index < count;
+      index += 1
+    ) {
+      const star =
+        document.createElement("span");
 
       star.className = "star";
-      star.style.left = `${Math.random() * 100}%`;
-      star.style.top = `${Math.random() * 100}%`;
+
+      star.style.left =
+        `${Math.random() * 100}%`;
+
+      star.style.top =
+        `${Math.random() * 100}%`;
 
       star.style.setProperty(
         "--duration",
@@ -453,10 +584,27 @@
     );
   }
 
-  if (audioPlayer) {
-    audioPlayer.addEventListener("play", synchronizeVisualizer);
-    audioPlayer.addEventListener("pause", synchronizeVisualizer);
-    audioPlayer.addEventListener("ended", synchronizeVisualizer);
+  function initializeAudio() {
+    if (!audioPlayer) {
+      return;
+    }
+
+    audioPlayer.addEventListener(
+      "play",
+      synchronizeVisualizer
+    );
+
+    audioPlayer.addEventListener(
+      "pause",
+      synchronizeVisualizer
+    );
+
+    audioPlayer.addEventListener(
+      "ended",
+      synchronizeVisualizer
+    );
+
+    synchronizeVisualizer();
   }
 
   /* =====================================================
@@ -470,13 +618,22 @@
 
     confetti.innerHTML = "";
 
-    const fragment = document.createDocumentFragment();
+    const fragment =
+      document.createDocumentFragment();
 
-    for (let index = 0; index < 72; index += 1) {
-      const piece = document.createElement("span");
+    for (
+      let index = 0;
+      index < 72;
+      index += 1
+    ) {
+      const piece =
+        document.createElement("span");
 
-      piece.className = "confetti-piece";
-      piece.style.left = `${Math.random() * 100}%`;
+      piece.className =
+        "confetti-piece";
+
+      piece.style.left =
+        `${Math.random() * 100}%`;
 
       piece.style.setProperty(
         "--hue",
@@ -493,7 +650,8 @@
         `${-100 + Math.random() * 200}px`
       );
 
-      piece.style.animationDelay = `${Math.random() * 0.5}s`;
+      piece.style.animationDelay =
+        `${Math.random() * 0.5}s`;
 
       fragment.appendChild(piece);
     }
@@ -505,67 +663,111 @@
     }, 5500);
   }
 
-  if (celebrateButton) {
-    celebrateButton.addEventListener("click", celebrate);
+  function initializeCelebration() {
+    if (celebrateButton) {
+      celebrateButton.addEventListener(
+        "click",
+        celebrate
+      );
+    }
   }
 
   /* =====================================================
      PANEL LIGHTING
   ===================================================== */
 
-  document.querySelectorAll(".panel").forEach((panel) => {
-    panel.addEventListener("pointermove", (event) => {
-      const rectangle = panel.getBoundingClientRect();
+  function initializePanelLighting() {
+    document
+      .querySelectorAll(".panel")
+      .forEach((panel) => {
+        panel.addEventListener(
+          "pointermove",
+          (event) => {
+            const rectangle =
+              panel.getBoundingClientRect();
 
-      const mouseX =
-        ((event.clientX - rectangle.left) / rectangle.width) * 100;
+            const mouseX =
+              ((event.clientX - rectangle.left) /
+                rectangle.width) *
+              100;
 
-      const mouseY =
-        ((event.clientY - rectangle.top) / rectangle.height) * 100;
+            const mouseY =
+              ((event.clientY - rectangle.top) /
+                rectangle.height) *
+              100;
 
-      panel.style.setProperty("--mx", `${mouseX}%`);
-      panel.style.setProperty("--my", `${mouseY}%`);
-    });
+            panel.style.setProperty(
+              "--mx",
+              `${mouseX}%`
+            );
 
-    panel.addEventListener("pointerleave", () => {
-      panel.style.removeProperty("--mx");
-      panel.style.removeProperty("--my");
-    });
-  });
+            panel.style.setProperty(
+              "--my",
+              `${mouseY}%`
+            );
+          }
+        );
+
+        panel.addEventListener(
+          "pointerleave",
+          () => {
+            panel.style.removeProperty("--mx");
+            panel.style.removeProperty("--my");
+          }
+        );
+      });
+  }
 
   /* =====================================================
      HIDDEN LOGO INTERACTION
   ===================================================== */
 
-  if (copyrightLogo) {
-    copyrightLogo.addEventListener("click", (event) => {
-      logoClicks += 1;
+  function initializeLogoInteraction() {
+    if (!copyrightLogo) {
+      return;
+    }
 
-      window.clearTimeout(logoTimer);
+    copyrightLogo.addEventListener(
+      "click",
+      (event) => {
+        logoClickCount += 1;
 
-      logoTimer = window.setTimeout(() => {
-        logoClicks = 0;
-      }, 1800);
+        window.clearTimeout(logoClickTimer);
 
-      if (logoClicks >= 7) {
+        logoClickTimer =
+          window.setTimeout(() => {
+            logoClickCount = 0;
+          }, 1800);
+
+        if (logoClickCount < 7) {
+          return;
+        }
+
         event.preventDefault();
 
-        logoClicks = 0;
+        logoClickCount = 0;
 
-        document.body.classList.toggle("secret-awake");
+        document.body.classList.toggle(
+          "secret-awake"
+        );
+
         celebrate();
       }
-    });
+    );
   }
 
   /* =====================================================
-     START
+     START DASHBOARD
   ===================================================== */
 
   function initializeDashboard() {
+    initializeTabs();
     createStars();
-    synchronizeVisualizer();
-    loadNewestMembers();
+    initializeAudio();
+    initializeCelebration();
+    initializePanelLighting();
+    initializeLogoInteraction();
+    initializeMemberBoard();
   }
 
   if (document.readyState === "loading") {
